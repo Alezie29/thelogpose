@@ -27,7 +27,9 @@ const CREW = [
     bg: "#140004", ink: "#EF4444", muted: "#7a1a1a", panel: "#1e0508", border: "#4a0f10" },
 ];
 
-const DAILY_GOAL = 10;
+const DEFAULT_GOAL = 10;
+const MIN_GOAL = 1;
+const MAX_GOAL = 30;
 const STORAGE_KEY = "op_tracker_v4";
 const WINDOWS = [7, 14, 30];
 
@@ -51,13 +53,13 @@ function getChar(count) {
   return CREW[Math.min(count, CREW.length) - 1];
 }
 
-function buildChartData(history, w) {
+function buildChartData(history, w, goal) {
   const days = [];
   for (let i = w - 1; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const key = d.toISOString().split("T")[0];
     const entry = history.find(h => h.date === key);
-    days.push({ label: fmtShort(key), eps: entry ? entry.count : 0, hit: entry ? entry.count >= DAILY_GOAL : false });
+    days.push({ label: fmtShort(key), eps: entry ? entry.count : 0, hit: entry ? entry.count >= goal : false });
   }
   return days;
 }
@@ -65,10 +67,10 @@ function buildChartData(history, w) {
 export default function OnePieceTracker() {
   const [state, setState] = useState(() => {
     const s = loadState(); const today = getToday();
-    if (s && s.date === today) return s;
+    if (s && s.date === today) return { goal: DEFAULT_GOAL, ...s };
     const yd = new Date(); yd.setDate(yd.getDate() - 1);
-    const carried = s && s.date === yd.toISOString().split("T")[0] && s.todayCount >= DAILY_GOAL;
-    return { date: today, todayCount: 0, streak: carried ? (s?.streak || 0) : 0, totalWatched: s?.totalWatched || 0, history: s?.history || [] };
+    const carried = s && s.date === yd.toISOString().split("T")[0] && s.todayCount >= (s.goal || DEFAULT_GOAL);
+    return { date: today, todayCount: 0, streak: carried ? (s?.streak || 0) : 0, totalWatched: s?.totalWatched || 0, history: s?.history || [], goal: s?.goal || DEFAULT_GOAL };
   });
 
   const [animating, setAnimating] = useState(false);
@@ -82,6 +84,7 @@ export default function OnePieceTracker() {
   const [chartWindow, setChartWindow] = useState(7);
   const [showChart, setShowChart] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [showGoalEdit, setShowGoalEdit] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [pipAnims, setPipAnims] = useState({});
   const prevCount = useRef(0);
@@ -90,18 +93,19 @@ export default function OnePieceTracker() {
   useEffect(() => { if (mounted) localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }, [state, mounted]);
 
   const char = getChar(state.todayCount);
-  const goalReached = state.todayCount >= DAILY_GOAL;
-  const prog = Math.min(state.todayCount / DAILY_GOAL, 1);
-  const chartData = buildChartData(state.history, chartWindow);
+  const goal = state.goal || DEFAULT_GOAL;
+  const goalReached = state.todayCount >= goal;
+  const prog = Math.min(state.todayCount / goal, 1);
+  const chartData = buildChartData(state.history, chartWindow, goal);
 
-  const fetchAI = useCallback(async (count, c) => {
+  const fetchAI = useCallback(async (count, c, g) => {
     setLoadingAI(true); setAiMsg("");
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6", max_tokens: 80,
-          messages: [{ role: "user", content: `You are ${c.name} from One Piece. The fan just watched episode ${count} today (daily goal: ${DAILY_GOAL}). Give a short in-character reaction (1-2 sentences). Stay true to ${c.name}'s personality. No hashtags, asterisks, or emojis.` }]
+          messages: [{ role: "user", content: `You are ${c.name} from One Piece. The fan just watched episode ${count} today (daily goal: ${g}). Give a short in-character reaction (1-2 sentences). Stay true to ${c.name}'s personality. No hashtags, asterisks, or emojis.` }]
         })
       });
       const d = await res.json();
@@ -117,7 +121,7 @@ export default function OnePieceTracker() {
     setPopAnim(false);
 
     const n = state.todayCount + 1;
-    const hitGoal = n === DAILY_GOAL;
+    const hitGoal = n === goal;
     const today = getToday();
     const nextChar = getChar(n);
     const curChar = getChar(state.todayCount);
@@ -147,8 +151,12 @@ export default function OnePieceTracker() {
 
     if (hitGoal) { setFlash(true); setTimeout(() => setFlash(false), 900); }
     prevCount.current = n;
-    fetchAI(n, nextChar);
+    fetchAI(n, nextChar, goal);
     setTimeout(() => setAnimating(false), 300);
+  };
+
+  const changeGoal = (delta) => {
+    setState(s => ({ ...s, goal: Math.min(MAX_GOAL, Math.max(MIN_GOAL, (s.goal || DEFAULT_GOAL) + delta)) }));
   };
 
   const doReset = () => {
@@ -159,7 +167,7 @@ export default function OnePieceTracker() {
   };
 
   const share = async () => {
-    const t = `🏴‍☠️ The Log Pose\n📅 ${mounted ? fmtDate(state.date) : ""}\n📺 Today: ${state.todayCount}/${DAILY_GOAL} eps\n🔥 Streak: ${state.streak} days\n📊 Total: ${state.totalWatched} episodes`;
+    const t = `🏴‍☠️ The Log Pose\n📅 ${mounted ? fmtDate(state.date) : ""}\n📺 Today: ${state.todayCount}/${goal} eps\n🔥 Streak: ${state.streak} days\n📊 Total: ${state.totalWatched} episodes`;
     try { await navigator.share({ text: t }); }
     catch { try { await navigator.clipboard.writeText(t); setToast("Copied to clipboard"); setTimeout(() => setToast(""), 2000); } catch {} }
   };
@@ -171,7 +179,7 @@ export default function OnePieceTracker() {
       <div style={{ background: char.panel, border: `1px solid ${char.border}`, borderRadius: 10, padding: "8px 14px", fontSize: 12 }}>
         <div style={{ color: char.muted, marginBottom: 2 }}>{label}</div>
         <div style={{ color: char.ink, fontWeight: 700 }}>{eps} ep{eps !== 1 ? "s" : ""}</div>
-        {eps >= DAILY_GOAL && <div style={{ color: char.muted, fontSize: 10, marginTop: 2 }}>Goal hit ✓</div>}
+        {eps >= goal && <div style={{ color: char.muted, fontSize: 10, marginTop: 2 }}>Goal hit ✓</div>}
       </div>
     );
   };
@@ -265,8 +273,30 @@ export default function OnePieceTracker() {
             <span style={{ fontSize: 10, color: char.muted, letterSpacing: 3, textTransform: "uppercase", transition: "color 0.4s" }}>Today</span>
             <span style={{ fontSize: 40, fontWeight: 900, color: goalReached ? char.ink : "#e8e8e8", lineHeight: 1, letterSpacing: -2, transition: "color 0.4s", fontVariantNumeric: "tabular-nums" }}>
               {state.todayCount}
-              <span style={{ fontSize: 16, fontWeight: 400, color: char.muted, letterSpacing: 0 }}>/{DAILY_GOAL}</span>
+              <span onClick={() => setShowGoalEdit(v => !v)} title="Change daily goal" style={{ fontSize: 16, fontWeight: 400, color: showGoalEdit ? char.ink : char.muted, letterSpacing: 0, cursor: "pointer", transition: "color 0.2s", userSelect: "none" }}>/{goal} ✎</span>
             </span>
+          </div>
+
+          {/* Goal editor */}
+          <div style={{ maxHeight: showGoalEdit ? 60 : 0, overflow: "hidden", transition: "max-height 0.3s cubic-bezier(0.4,0,0.2,1)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, padding: "10px 12px", borderRadius: 12, border: `1px solid ${char.border}`, background: char.ink + "08" }}>
+              <span style={{ fontSize: 10, color: char.muted, letterSpacing: 3, textTransform: "uppercase" }}>Daily Goal</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button onClick={() => changeGoal(-1)} disabled={goal <= MIN_GOAL} style={{
+                  width: 26, height: 26, borderRadius: "50%", border: `1px solid ${goal <= MIN_GOAL ? char.border : char.ink}`,
+                  background: "transparent", color: goal <= MIN_GOAL ? char.muted : char.ink,
+                  fontSize: 14, fontWeight: 700, cursor: goal <= MIN_GOAL ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, transition: "all 0.2s",
+                }}>−</button>
+                <span style={{ fontSize: 18, fontWeight: 900, color: char.ink, minWidth: 28, textAlign: "center", fontVariantNumeric: "tabular-nums" }}>{goal}</span>
+                <button onClick={() => changeGoal(1)} disabled={goal >= MAX_GOAL} style={{
+                  width: 26, height: 26, borderRadius: "50%", border: `1px solid ${goal >= MAX_GOAL ? char.border : char.ink}`,
+                  background: "transparent", color: goal >= MAX_GOAL ? char.muted : char.ink,
+                  fontSize: 14, fontWeight: 700, cursor: goal >= MAX_GOAL ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, transition: "all 0.2s",
+                }}>+</button>
+              </div>
+            </div>
           </div>
 
           {/* Progress bar */}
@@ -311,7 +341,7 @@ export default function OnePieceTracker() {
               <span style={{ fontSize: 10, letterSpacing: 3, color: char.muted, textTransform: "uppercase" }}>Watch History</span>
               {state.history.length > 0 && (
                 <span style={{ fontSize: 10, color: char.ink, fontWeight: 700 }}>
-                  {state.history.filter(h => h.count >= DAILY_GOAL).length} goal days
+                  {state.history.filter(h => h.count >= goal).length} goal days
                 </span>
               )}
             </div>
@@ -337,7 +367,7 @@ export default function OnePieceTracker() {
                     <XAxis dataKey="label" tick={{ fill: char.muted, fontSize: 9 }} axisLine={false} tickLine={false} interval={chartWindow === 7 ? 0 : chartWindow === 14 ? 1 : 4} />
                     <YAxis tick={{ fill: char.muted, fontSize: 9 }} axisLine={false} tickLine={false} domain={[0, "auto"]} />
                     <Tooltip content={<CustomTooltip />} />
-                    <ReferenceLine y={DAILY_GOAL} stroke={char.ink + "44"} strokeDasharray="4 3" />
+                    <ReferenceLine y={goal} stroke={char.ink + "44"} strokeDasharray="4 3" />
                     <Line type="monotone" dataKey="eps" stroke={char.ink} strokeWidth={2}
                       dot={({ cx, cy, payload }) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={payload.hit ? 5 : 3} fill={payload.hit ? char.ink : char.ink + "66"} />}
                       activeDot={{ r: 6, fill: char.ink, stroke: char.panel, strokeWidth: 2 }} />
