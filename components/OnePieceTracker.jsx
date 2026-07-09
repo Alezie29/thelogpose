@@ -104,6 +104,7 @@ export default function OnePieceTracker() {
   const [chartWindow, setChartWindow] = useState(7);
   const [showChart, setShowChart] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmResetAll, setConfirmResetAll] = useState(false);
   const [showGoalEdit, setShowGoalEdit] = useState(false);
   const [showVoyageEdit, setShowVoyageEdit] = useState(false);
   const [epDraft, setEpDraft] = useState("");
@@ -143,6 +144,7 @@ export default function OnePieceTracker() {
   const logEp = () => {
     if (animating) return;
     setConfirmReset(false);
+    setConfirmResetAll(false);
     setAnimating(true);
     setPopAnim(false);
 
@@ -211,6 +213,15 @@ export default function OnePieceTracker() {
     setAiMsg("");
     setConfirmReset(false);
     setPipAnims({});
+  };
+
+  const doResetAll = () => {
+    setState(s => ({ ...s, todayCount: 0, streak: 0, totalWatched: 0 }));
+    setAiMsg("");
+    setConfirmResetAll(false);
+    setPipAnims({});
+    setToast("All stats reset");
+    setTimeout(() => setToast(""), 2000);
   };
 
   const share = async () => {
@@ -512,7 +523,7 @@ export default function OnePieceTracker() {
           {goalReached
             ? "Goal reached — log another"
             : state.currentEp != null
-            ? `Log episode ${state.currentEp + 1}`
+            ? `Log episode ${Math.max(state.currentEp, 1)}`
             : state.todayCount === 0
             ? "Set sail — log episode 1"
             : `Log episode ${state.todayCount + 1}`}
@@ -550,6 +561,31 @@ export default function OnePieceTracker() {
               <div style={{ ...label(char.muted, 9), marginTop: 6 }}>{s.l}</div>
             </div>
           ))}
+        </div>
+
+        {/* ── RESET ALL ── */}
+        <div style={{ display: "flex", gap: 10, marginBottom: 28 }}>
+          {!confirmResetAll ? (
+            <button onClick={() => setConfirmResetAll(true)} style={{
+              flex: 1, padding: "13px", borderRadius: 8,
+              border: `1px solid ${char.border}`, background: "transparent",
+              color: char.muted, fontFamily: MONO, fontSize: 10, letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", transition: "all 0.3s",
+            }}>Reset all stats</button>
+          ) : (
+            <>
+              <button onClick={doResetAll} style={{
+                flex: 1, padding: "13px", borderRadius: 8,
+                border: `1px solid #ef444455`, background: "#ef444415",
+                color: "#ef4444", fontFamily: MONO, fontSize: 10, letterSpacing: 2, textTransform: "uppercase", fontWeight: 700, cursor: "pointer", transition: "all 0.15s",
+                animation: "shake 0.3s ease",
+              }}>Confirm reset all</button>
+              <button onClick={() => setConfirmResetAll(false)} style={{
+                flex: 1, padding: "13px", borderRadius: 8,
+                border: `1px solid ${char.border}`, background: "transparent",
+                color: char.muted, fontFamily: MONO, fontSize: 10, letterSpacing: 2, textTransform: "uppercase", cursor: "pointer", transition: "all 0.3s",
+              }}>Cancel</button>
+            </>
+          )}
         </div>
 
         {/* ── CREW ROSTER ── */}
